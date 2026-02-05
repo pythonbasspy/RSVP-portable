@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Leitor RSVP Mobile - Ajustado</title>
+    
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.4.2/mammoth.browser.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
+    <script>pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';</script>
+
+    <style>
+        :root {
+            --bg-color: #121212;
+            --text-color: #e0e0e0;
+            --anchor-color: #ff0000;
+        }
+
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            font-family: 'Courier New', Courier, monospace;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            touch-action: manipulation; /* Melhora resposta ao toque */
+        }
+
+        /* Display Principal */
+        .display-area {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+            font-size: 11vw; /* Tamanho responsivo para celular */
+            font-weight: bold;
+        }
+
+        /* Guias Visuais */
+        .guide {
+            position: absolute;
+            width: 2px;
+            height: 30px;
+            background-color: #444;
+            left: 50%;
+            transform: translateX(-50%);
+        }
+        .guide-top { top: 20%; }
+        .guide-bottom { bottom: 20%; }
+
+        /* Container da Palavra */
+        .word-container {
+            display: flex;
+            align-items: baseline;
+            white-space: pre;
+        }
+
+        .part-left { flex: 1; text-align: right; color: var(--text-color); }
+        .part-center { color: var(--anchor-color); text-align: center; width: auto; }
+        .part-right { flex: 1; text-align: left; color: var(--text-color); }
+
+        /* Controles Inferiores */
+        .controls {
+            background-color: #1e1e1e;
+            /* AQUI FOI O AJUSTE: Aumentei o padding inferior para 60px */
+            padding: 20px 20px 60px 20px; 
+            border-top-left-radius: 20px;
+            border-top-right-radius: 20px;
+            box-shadow: 0 -5px 15px rgba(0,0,0,0.5);
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+
+        .row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 10px;
+        }
+
+        /* Botões Estilizados */
+        button {
+            padding: 15px;
+            border: none;
+            border-radius: 10px;
+            font-size: 1rem;
+            font-weight: bold;
+            background-color: #333;
+            color: white;
+            cursor: pointer;
+        }
+        button:active { background-color: #555; }
+        
+        .btn-play { 
+            flex: 2; 
+            background-color: var(--text-color); 
+            color: var(--bg-color); 
+            font-size: 1.2rem;
+        }
+
+        .btn-file {
+            background-color: #007bff;
+            color: white;
+            width: 100%;
+            text-align: center;
+        }
+
+        input[type="range"] { width: 100%; }
+        
+        select {
+            padding: 10px;
+            background: #333;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            font-size: 1rem;
+        }
+
+        #fileInput { display: none; } /* Esconde o input feio nativo */
+        
+        .status-text {
+            text-align: center;
+            font-size: 0.8rem;
+            color: #888;
+            margin-bottom: 5px;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="display-area" id="displayArea">
+        <div class="guide guide-top"></div>
+        <div class="guide guide-bottom"></div>
+        
+        <div class="word-container">
+            <span id="txtLeft" class="part-left"></span>
+            <span id="txtCenter" class="part-center">ELIAS</span>
+            <span id="txtRight" class="part-right">RSVP</span>
+        </div>
+    </div>
+
+    <div class="controls">
+        <div class="status-text" id="statusText">Toque em "Abrir Arquivo"</div>
+        
+        <div class="row">
+            <label for="fileInput" class="button btn-file">📂 Abrir Arquivo</label>
+            <input type="file" id="fileInput" accept=".txt,.docx,.pdf">
+        </div>
+
+        <div class="row">
+            <span id="wpmValue" style="color:#aaa; font-size: 0.9rem;">300 WPM</span>
+            <input type="range" id="wpmRange" min="300" max="900" step="10" value="300">
+        </div>
+
+        <div class="row">
+            <select id="rewindSelect">
+                <option value="1">1</option>
+                <option value="5">5</option>
+                <option value="10" selected>10</option>
+                <option value="25">25</option>
+            </select>
+            
+            <button id="btnBack">⟲ Voltar</button>
+            <button id="btnPlay" class="btn-play">▶ PLAY</button>
+        </div>
+    </div>
+
+    <script>
+        // Variáveis
+        let words = [];
+        let index = 0;
+        let isRunning = false;
+        let timer = null;
+        let wpm = 300;
+
+        // Elementos
+        const txtLeft = document.getElementById('txtLeft');
+        const txtCenter = document.getElementById('txtCenter');
+        const txtRight = document.getElementById('txtRight');
+        const btnPlay = document.getElementById('btnPlay');
+        const btnBack = document.getElementById('btnBack');
+        const statusText = document.getElementById('statusText');
+        const wpmRange = document.getElementById('wpmRange');
+        const wpmValue = document.getElementById('wpmValue');
+        const rewindSelect = document.getElementById('rewindSelect');
+
+        // --- 1. Carregamento de Arquivos ---
+        document.getElementById('fileInput').addEventListener('change', async (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            stop();
+            txtCenter.innerText = "⏳";
+            statusText.innerText = "Processando...";
+            
+            try {
+                let text = "";
+                const ext = file.name.split('.').pop().toLowerCase();
+
+                if (ext === 'txt') {
+                    text = await file.text();
+                } 
+                else if (ext === 'docx') {
+                    const arrayBuffer = await file.arrayBuffer();
+                    const result = await mammoth.extractRawText({ arrayBuffer });
+                    text = result.value;
+                }
+                else if (ext === 'pdf') {
+                    const arrayBuffer = await file.arrayBuffer();
+                    const pdf = await pdfjsLib.getDocument(arrayBuffer).promise;
+                    for (let i = 1; i <= pdf.numPages; i++) {
+                        const page = await pdf.getPage(i);
+                        const content = await page.getTextContent();
+                        text += content.items.map(item => item.str).join(" ") + " ";
+                        statusText.innerText = `Lendo PDF: ${Math.round((i/pdf.numPages)*100)}%`;
+                    }
+                }
+
+                // Processar texto
+                words = text.split(/\s+/).filter(w => w.trim().length > 0);
+                
+                if (words.length > 0) {
+                    index = 0;
+                    statusText.innerText = `Pronto: ${words.length} palavras`;
+                    render();
+                } else {
+                    statusText.innerText = "Arquivo vazio!";
+                }
+
+            } catch (err) {
+                alert("Erro ao ler arquivo: " + err.message);
+                statusText.innerText = "Erro na leitura";
+            }
+        });
+
+        // --- 2. Renderização (Lógica da Âncora) ---
+        function render() {
+            if (!words[index]) return;
+            const word = words[index];
+            
+            let pivot = 1;
+            if (word.length === 1) pivot = 0;
+            else if (word.length >= 2 && word.length <= 5) pivot = 1;
+            else pivot = Math.ceil(word.length / 2) - 1;
+
+            txtLeft.innerText = word.substring(0, pivot);
+            txtCenter.innerText = word.substring(pivot, pivot + 1);
+            txtRight.innerText = word.substring(pivot + 1);
+
+            statusText.innerText = `${index + 1} / ${words.length}`;
+        }
+
+        // --- 3. Motor (Loop) ---
+        function loop() {
+            if (index < words.length - 1) {
+                index++;
+                render();
+            } else {
+                stop();
+                txtCenter.innerText = "FIM";
+            }
+        }
+
+        function start() {
+            if (words.length === 0) return;
+            isRunning = true;
+            btnPlay.innerText = "❚❚";
+            
+            const interval = 60000 / wpm;
+            timer = setInterval(loop, interval);
+        }
+
+        function stop() {
+            isRunning = false;
+            clearInterval(timer);
+            btnPlay.innerText = "▶ PLAY";
+        }
+
+        // --- 4. Controles ---
+        btnPlay.addEventListener('click', () => isRunning ? stop() : start());
+
+        btnBack.addEventListener('click', () => {
+            const step = parseInt(rewindSelect.value);
+            index = Math.max(0, index - step);
+            render();
+            if (isRunning) {
+                stop();
+                setTimeout(start, 500); // Pequena pausa pra respirar
+            }
+        });
+
+        wpmRange.addEventListener('input', (e) => {
+            wpm = e.target.value;
+            wpmValue.innerText = `${wpm} WPM`;
+            if (isRunning) {
+                stop();
+                start();
+            }
+        });
+    </script>
+</body>
+</html>
